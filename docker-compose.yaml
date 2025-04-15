@@ -1,0 +1,38 @@
+x-common-env: &common-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: zabbix
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: secret
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zbridge_db
+    environment:
+      <<: *common-env
+    volumes:
+      - ./.data:/var/lib/postgresql/data
+      - ./infra/postgres:/docker-entrypoint-initdb.d
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  zabbix-bridge:
+    build: .
+    container_name: ssh-config-api
+    environment:
+      <<: *common-env
+    ports:
+      - "8000:8000"
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - postgres
