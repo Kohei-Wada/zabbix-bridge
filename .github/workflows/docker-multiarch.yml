@@ -42,4 +42,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ env.REPO_OWNER }}/zabbix-bridge:latest
-            ghcr.io/${{ env.REPO_OWNER }}/zabbix-brigde:${{ github.sha }}
+            ghcr.io/${{ env.REPO_OWNER }}/zabbix-bridde:${{ github.sha }}
