@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Body, Query
+from fastapi import FastAPI, HTTPException, Body, Query, Depends
 from pydantic import BaseModel
 from typing import List, Union, Optional
 import os
@@ -44,16 +44,13 @@ class HostResponse(BaseModel):
     proxy_name: Optional[str] = None
 
 
-@app.post("/hosts")
-def insert_hosts(req: Union[HostCreateRequest, List[HostCreateRequest]] = Body(...)):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+class HostRepository:
+    def __init__(self, connection):
+        self.conn = connection
 
-        if not isinstance(req, list):
-            req = [req]
-
-        for host in req:
+    def insert_hosts(self, hosts: List[HostCreateRequest]):
+        cursor = self.conn.cursor()
+        for host in hosts:
             cursor.execute(
                 """
                 INSERT INTO hosts (zabbix_url, hostid, host, name, ip, maintenance_port, proxy_name)
@@ -63,13 +60,10 @@ def insert_hosts(req: Union[HostCreateRequest, List[HostCreateRequest]] = Body(.
                     name = EXCLUDED.name,
                     ip = EXCLUDED.ip,
                     maintenance_port = EXCLUDED.maintenance_port,
-
                     proxy_name = EXCLUDED.proxy_name
                 """,
                 (
-
                     host.zabbix_url,
-
                     host.hostid,
                     host.host,
                     host.name,
@@ -78,39 +72,24 @@ def insert_hosts(req: Union[HostCreateRequest, List[HostCreateRequest]] = Body(.
                     host.proxy_name,
                 )
             )
-
-        conn.commit()
+        self.conn.commit()
         cursor.close()
-
-        conn.close()
-
         return {
-
             "status": "ok",
-            "inserted": len(req),
-            "hosts": [h.name for h in req]
+            "inserted": len(hosts),
+            "hosts": [h.name for h in hosts],
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/hosts", response_model=List[HostResponse])
-def get_hosts(zabbix_url: Optional[str] = Query(None)):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
+    def get_hosts(self, zabbix_url: Optional[str] = None) -> List[HostResponse]:
+        cursor = self.conn.cursor()
         if zabbix_url:
             cursor.execute(
                 """
                 SELECT zabbix_url, hostid, host, name, ip, maintenance_port, proxy_name
-
                 FROM hosts
                 WHERE zabbix_url = %s
-
                 """,
-                (zabbix_url,)
+                (zabbix_url,),
             )
         else:
             cursor.execute(
@@ -119,12 +98,8 @@ def get_hosts(zabbix_url: Optional[str] = Query(None)):
                 FROM hosts
                 """
             )
-
         rows = cursor.fetchall()
         cursor.close()
-
-        conn.close()
-
         return [
             HostResponse(
                 zabbix_url=row[0],
@@ -132,12 +107,39 @@ def get_hosts(zabbix_url: Optional[str] = Query(None)):
                 host=row[2],
                 name=row[3],
                 ip=row[4],
-
                 maintenance_port=row[5],
                 proxy_name=row[6],
             )
             for row in rows
         ]
 
+
+def get_repository():
+    conn = get_db_connection()
+    try:
+        yield HostRepository(conn)
+    finally:
+        conn.close()
+
+
+@app.post("/hosts")
+def insert_hosts(
+    req: Union[HostCreateRequest, List[HostCreateRequest]] = Body(...),
+    repo: HostRepository = Depends(get_repository)
+):
+    try:
+        req_list = req if isinstance(req, list) else [req]
+        return repo.insert_hosts(req_list)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/hosts", response_model=List[HostResponse])
+def get_hosts(
+    zabbix_url: Optional[str] = Query(None),
+    repo: HostRepository = Depends(get_repository)
+):
+    try:
+        return repo.get_hosts(zabbix_url)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
