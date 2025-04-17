@@ -1,131 +1,17 @@
 from fastapi import FastAPI, HTTPException, Body, Query, Depends
-from pydantic import BaseModel
 from typing import List, Union, Optional
-import os
-import psycopg2
 
+from db import get_repository
+from models import HostCreateRequest, HostResponse
+from repository import HostRepository
 
 app = FastAPI()
-
-DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
-DB_PORT = os.getenv("POSTGRES_PORT", "5432")
-DB_NAME = os.getenv("POSTGRES_DB", "zabbix")
-DB_USER = os.getenv("POSTGRES_USER", "postgres")
-DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
-
-
-def get_db_connection():
-    return psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS
-    )
-
-
-class HostCreateRequest(BaseModel):
-    zabbix_url: str
-    hostid: str
-    host: str
-    name: str
-    ip: str
-    maintenance_port: str
-    proxy_name: Optional[str] = None
-
-
-class HostResponse(BaseModel):
-    zabbix_url: str
-    hostid: str
-    host: str
-    name: str
-    ip: str
-    maintenance_port: str
-    proxy_name: Optional[str] = None
-
-
-class HostRepository:
-    def __init__(self, connection):
-        self.conn = connection
-
-    def insert_hosts(self, hosts: List[HostCreateRequest]):
-        cursor = self.conn.cursor()
-        for host in hosts:
-            cursor.execute(
-                """
-                INSERT INTO hosts (zabbix_url, hostid, host, name, ip, maintenance_port, proxy_name)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (zabbix_url, hostid) DO UPDATE SET
-                    host = EXCLUDED.host,
-                    name = EXCLUDED.name,
-                    ip = EXCLUDED.ip,
-                    maintenance_port = EXCLUDED.maintenance_port,
-                    proxy_name = EXCLUDED.proxy_name
-                """,
-                (
-                    host.zabbix_url,
-                    host.hostid,
-                    host.host,
-                    host.name,
-                    host.ip,
-                    host.maintenance_port,
-                    host.proxy_name,
-                )
-            )
-        self.conn.commit()
-        cursor.close()
-        return {
-            "status": "ok",
-            "inserted": len(hosts),
-            "hosts": [h.name for h in hosts],
-        }
-
-    def get_hosts(self, zabbix_url: Optional[str] = None) -> List[HostResponse]:
-        cursor = self.conn.cursor()
-        if zabbix_url:
-            cursor.execute(
-                """
-                SELECT zabbix_url, hostid, host, name, ip, maintenance_port, proxy_name
-                FROM hosts
-                WHERE zabbix_url = %s
-                """,
-                (zabbix_url,),
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT zabbix_url, hostid, host, name, ip, maintenance_port, proxy_name
-                FROM hosts
-                """
-            )
-        rows = cursor.fetchall()
-        cursor.close()
-        return [
-            HostResponse(
-                zabbix_url=row[0],
-                hostid=row[1],
-                host=row[2],
-                name=row[3],
-                ip=row[4],
-                maintenance_port=row[5],
-                proxy_name=row[6],
-            )
-            for row in rows
-        ]
-
-
-def get_repository():
-    conn = get_db_connection()
-    try:
-        yield HostRepository(conn)
-    finally:
-        conn.close()
 
 
 @app.post("/hosts")
 def insert_hosts(
     req: Union[HostCreateRequest, List[HostCreateRequest]] = Body(...),
-    repo: HostRepository = Depends(get_repository)
+    repo: HostRepository = Depends(get_repository),
 ):
     try:
         req_list = req if isinstance(req, list) else [req]
@@ -137,7 +23,7 @@ def insert_hosts(
 @app.get("/hosts", response_model=List[HostResponse])
 def get_hosts(
     zabbix_url: Optional[str] = Query(None),
-    repo: HostRepository = Depends(get_repository)
+    repo: HostRepository = Depends(get_repository),
 ):
     try:
         return repo.get_hosts(zabbix_url)

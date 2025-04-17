@@ -1,6 +1,7 @@
 import unittest
 
-from main import HostRepository, HostCreateRequest, HostResponse
+from repository import HostRepository
+from models import HostCreateRequest, HostResponse
 
 
 class FakeCursor:
